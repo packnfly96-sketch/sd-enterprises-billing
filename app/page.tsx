@@ -880,13 +880,37 @@ export default function Home() {
   }
 
   function handleDocketInputKeyDown(
-    event: ReactKeyboardEvent<HTMLInputElement | HTMLSelectElement>,
+    event: ReactKeyboardEvent<HTMLInputElement>,
   ) {
     if (event.key !== "Enter") return;
 
     event.preventDefault();
+    const rowFields = event.currentTarget
+      .closest("tr")
+      ?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
+    const currentIndex = rowFields
+      ? Array.from(rowFields).indexOf(event.currentTarget)
+      : -1;
+    const nextField = rowFields?.[currentIndex + 1];
+
+    if (nextField) {
+      nextField.focus();
+      return;
+    }
+
     if (event.currentTarget.form?.reportValidity()) {
       saveDocket();
+    }
+  }
+
+  function handleDocketSelectKeyDown(
+    event: ReactKeyboardEvent<HTMLSelectElement>,
+  ) {
+    if (event.key !== "Enter") return;
+
+    event.preventDefault();
+    if ("showPicker" in HTMLSelectElement.prototype) {
+      event.currentTarget.showPicker();
     }
   }
 
@@ -2059,7 +2083,7 @@ export default function Home() {
                                   <select
                                     required
                                     aria-label="Courier partner"
-                                    onKeyDown={handleDocketInputKeyDown}
+                                    onKeyDown={handleDocketSelectKeyDown}
                                     value={form.courier}
                                     onChange={(event) =>
                                       updateDocketField("courier", event.target.value)
@@ -2080,7 +2104,7 @@ export default function Home() {
                                   <select
                                     required
                                     aria-label="Mode"
-                                    onKeyDown={handleDocketInputKeyDown}
+                                    onKeyDown={handleDocketSelectKeyDown}
                                     value={form.mode}
                                     onChange={(event) => updateDocketField("mode", event.target.value)}
                                     className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-1.5 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
