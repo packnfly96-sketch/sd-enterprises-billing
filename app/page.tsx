@@ -47,6 +47,7 @@ type DocketForm = {
 };
 
 type Customer = {
+  _id?: string;
   name: string;
   phone: string;
   address: string;
@@ -95,7 +96,7 @@ type InvoiceType = "GST" | "Non-GST";
 type InvoiceFilter = "all" | InvoiceType;
 
 type SavedInvoice = {
-  id: string;
+  _id: string;
   invoiceNo: string;
   date: string;
   dueDate: string;
@@ -112,7 +113,28 @@ type SavedInvoice = {
   paymentStatus: string;
   terms: string;
   gstInclusive?: boolean;
-  companySettings?: CompanySettings;
+};
+
+type MongoInvoice = {
+  _id: string;
+  invoiceNo: string;
+  invoiceDate: string;
+  dueDate: string;
+  customerName: string;
+  customerState: string;
+  invoiceType: InvoiceType;
+  gstType: "CGST+SGST" | "IGST";
+  taxableValue: number;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  totalAmount: number;
+  status: string;
+  paymentStatus: string;
+  consignments: Docket[];
+  customer: Customer;
+  terms: string;
+  gstInclusive: boolean;
 };
 
 type ActiveTab = "dashboard" | "invoices" | "customers" | "couriers" | "reports" | "settings";
@@ -428,10 +450,6 @@ function isCompanySettings(value: unknown): value is CompanySettings {
     (settings.signature === undefined || typeof settings.signature === "string");
 }
 
-function isSavedCustomer(value: unknown): value is Customer {
-  return isCustomer(value);
-}
-
 function isCourierPartner(value: unknown): value is CourierPartner {
   if (typeof value !== "object" || value === null) return false;
   const partner = value as Record<string, unknown>;
@@ -452,51 +470,54 @@ function isAuthCredentials(value: unknown): value is AuthCredentials {
   return typeof credentials.email === "string" && typeof credentials.password === "string";
 }
 
-function isSavedInvoice(value: unknown): value is SavedInvoice {
+function isMongoInvoice(value: unknown): value is MongoInvoice {
   if (typeof value !== "object" || value === null) return false;
   const invoice = value as Record<string, unknown>;
 
   return (
-    typeof invoice.id === "string" &&
+    typeof invoice._id === "string" &&
     typeof invoice.invoiceNo === "string" &&
-    typeof invoice.date === "string" &&
+    typeof invoice.invoiceDate === "string" &&
     typeof invoice.dueDate === "string" &&
+    typeof invoice.customerName === "string" &&
+    typeof invoice.customerState === "string" &&
     isCustomer(invoice.customer) &&
-    (invoice.invoiceType === undefined ||
-      invoice.invoiceType === "GST" ||
-      invoice.invoiceType === "Non-GST") &&
+    (invoice.invoiceType === "GST" || invoice.invoiceType === "Non-GST") &&
     (invoice.gstType === "CGST+SGST" || invoice.gstType === "IGST") &&
     Array.isArray(invoice.consignments) &&
     invoice.consignments.every(isDocket) &&
-    typeof invoice.subtotal === "number" &&
-    typeof invoice.cgstTotal === "number" &&
-    typeof invoice.sgstTotal === "number" &&
-    typeof invoice.igstTotal === "number" &&
+    typeof invoice.taxableValue === "number" &&
+    typeof invoice.cgst === "number" &&
+    typeof invoice.sgst === "number" &&
+    typeof invoice.igst === "number" &&
     typeof invoice.totalAmount === "number" &&
     typeof invoice.status === "string" &&
     typeof invoice.paymentStatus === "string" &&
     typeof invoice.terms === "string" &&
-    (invoice.gstInclusive === undefined || typeof invoice.gstInclusive === "boolean") &&
-    (invoice.companySettings === undefined || isCompanySettings(invoice.companySettings))
+    typeof invoice.gstInclusive === "boolean"
   );
 }
 
-function withoutCompanySettingsSnapshot(invoice: SavedInvoice): SavedInvoice {
-  const invoiceWithoutSettings = { ...invoice };
-  delete invoiceWithoutSettings.companySettings;
-  return invoiceWithoutSettings;
-}
-
-function isQuotaExceededError(error: unknown) {
-  if (typeof error !== "object" || error === null) return false;
-  const storageError = error as { name?: unknown; code?: unknown };
-
-  return (
-    storageError.name === "QuotaExceededError" ||
-    storageError.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-    storageError.code === 22 ||
-    storageError.code === 1014
-  );
+function toSavedInvoice(invoice: MongoInvoice): SavedInvoice {
+  return {
+    _id: invoice._id,
+    invoiceNo: invoice.invoiceNo,
+    date: invoice.invoiceDate,
+    dueDate: invoice.dueDate,
+    customer: invoice.customer,
+    invoiceType: invoice.invoiceType,
+    gstType: invoice.gstType,
+    consignments: invoice.consignments,
+    subtotal: invoice.taxableValue,
+    cgstTotal: invoice.cgst,
+    sgstTotal: invoice.sgst,
+    igstTotal: invoice.igst,
+    totalAmount: invoice.totalAmount,
+    status: invoice.status,
+    paymentStatus: invoice.paymentStatus,
+    terms: invoice.terms,
+    gstInclusive: invoice.gstInclusive,
+  };
 }
 
 function NavIcon({ name }: { name: ActiveTab }) {
@@ -577,6 +598,8 @@ export default function Home() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [form, setForm] = useState<DocketForm>(emptyDocketForm);
   const [dockets, setDockets] = useState<Docket[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isMigratingOldData, setIsMigratingOldData] = useState(false);
   const [savedInvoices, setSavedInvoices] = useState<SavedInvoice[]>([]);
   const [previewInvoiceNo, setPreviewInvoiceNo] = useState(() =>
     createUniqueInvoiceNumber([]),
@@ -680,7 +703,7 @@ export default function Home() {
 
   const selectedCustomerRecord = customers.find(
     (customer) => customer.phone === selectedCustomer,
-  ) ?? savedInvoices.find((invoice) => invoice.id === editingInvoiceId)?.customer;
+  ) ?? savedInvoices.find((invoice) => invoice._id === editingInvoiceId)?.customer;
   const isSameState =
     selectedCustomerRecord?.state.trim().toLocaleLowerCase() ===
     companySettings.state.trim().toLocaleLowerCase();
@@ -772,61 +795,87 @@ export default function Home() {
         }
       }
 
-      const storedCustomers = localStorage.getItem("agc_customers");
-      if (storedCustomers) {
-        const parsedCustomers: unknown = JSON.parse(storedCustomers);
-        if (Array.isArray(parsedCustomers)) {
-          const validCustomers = parsedCustomers.filter(isSavedCustomer).map((customer) => ({
-            ...customer,
-            contactPerson: customer.contactPerson ?? "",
-            email: customer.email ?? "",
-            pan: customer.pan ?? "",
-            city: customer.city ?? "",
-            stateCode: customer.stateCode ?? "",
-            pincode: customer.pincode ?? "",
-            gstin: customer.gstin ?? "",
-          }));
-          if (validCustomers.length !== parsedCustomers.length) {
-            console.error("Some saved customers in localStorage have an invalid format.");
-          }
-          setCustomers(validCustomers);
-        } else {
-          console.error("Saved customer data in localStorage is not an array.");
-        }
-      }
-      const storedInvoices = localStorage.getItem("agc_invoices");
-      if (storedInvoices) {
-        const parsedInvoices: unknown = JSON.parse(storedInvoices);
-        if (Array.isArray(parsedInvoices)) {
-          const parsedValidInvoices = parsedInvoices.filter(isSavedInvoice);
-          const validInvoices = parsedValidInvoices.map((invoice) =>
-            withoutCompanySettingsSnapshot({ ...invoice, invoiceType: invoice.invoiceType ?? "GST" }),
-          );
-          if (validInvoices.length !== parsedInvoices.length) {
-            console.error("Some saved invoices in localStorage have an invalid format.");
-          }
-          setSavedInvoices(validInvoices);
-          if (
-            parsedValidInvoices.some(
-              (invoice) => invoice.companySettings !== undefined || invoice.invoiceType === undefined,
-            )
-          ) {
-            try {
-              localStorage.setItem("agc_invoices", JSON.stringify(validInvoices));
-            } catch (error) {
-              console.error(
-                "Could not remove duplicated company image data from saved invoice history.",
-                error,
-              );
-            }
-          }
-        } else {
-          console.error("Saved invoice data in localStorage is not an array.");
-        }
-      }
     } catch (error) {
-      console.error("Could not read saved company settings, customers, or invoices.", error);
+      console.error("Could not read saved account or company settings from localStorage.", error);
     }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchCollection(url: string) {
+      const response = await fetch(url);
+      const data: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof data === "object" && data !== null &&
+          typeof (data as Record<string, unknown>).error === "string"
+            ? (data as Record<string, string>).error
+            : `Request failed with status ${response.status}.`;
+        throw new Error(message);
+      }
+      return data;
+    }
+
+    async function loadData() {
+      const [invoicesResult, customersResult] = await Promise.allSettled([
+        fetchCollection("/api/invoices"),
+        fetchCollection("/api/customers"),
+      ]);
+
+      if (!active) return;
+
+      if (invoicesResult.status === "fulfilled") {
+        const invoices = invoicesResult.value;
+        if (Array.isArray(invoices) && invoices.every(isMongoInvoice)) {
+          setSavedInvoices(invoices.map(toSavedInvoice));
+        } else {
+          console.error("Invoice API returned data in an invalid format.");
+          setInvoiceError("Invoices could not be loaded because the server returned invalid data.");
+        }
+      } else {
+        console.error("Could not load invoices from the API.", invoicesResult.reason);
+        setInvoiceError("Invoices could not be loaded. Please refresh and try again.");
+      }
+
+      if (customersResult.status === "fulfilled") {
+        const customersData = customersResult.value;
+        if (
+          Array.isArray(customersData) &&
+          customersData.every(
+            (customer) =>
+              isCustomer(customer) &&
+              typeof (customer as Record<string, unknown>)._id === "string",
+          )
+        ) {
+          setCustomers(
+            customersData.map((customer) => ({
+              ...customer,
+              gstin: customer.gstin ?? "",
+              contactPerson: customer.contactPerson ?? "",
+              email: customer.email ?? "",
+              pan: customer.pan ?? "",
+              city: customer.city ?? "",
+              stateCode: customer.stateCode ?? "",
+              pincode: customer.pincode ?? "",
+            })),
+          );
+        } else {
+          console.error("Customer API returned data in an invalid format.");
+          setCustomerError("Customers could not be loaded because the server returned invalid data.");
+        }
+      } else {
+        console.error("Could not load customers from the API.", customersResult.reason);
+        setCustomerError("Customers could not be loaded. Please refresh and try again.");
+      }
+
+      setIsLoadingData(false);
+    }
+
+    void loadData();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -849,6 +898,132 @@ export default function Home() {
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isAddingCustomer]);
+
+  async function migrateOldDataToDB() {
+    if (isMigratingOldData) return;
+
+    setIsMigratingOldData(true);
+    let migratedCustomers = 0;
+    let migratedInvoices = 0;
+    const migratedCustomerRecords: Customer[] = [];
+    const migratedInvoiceRecords: SavedInvoice[] = [];
+
+    try {
+      const customerData = localStorage.getItem("agc_customers");
+      const invoiceData = localStorage.getItem("agc_invoices");
+      const parseStoredArray = (data: string | null, key: string): Record<string, unknown>[] => {
+        if (!data) return [];
+
+        const parsed: unknown = JSON.parse(data);
+        if (
+          !Array.isArray(parsed) ||
+          !parsed.every(
+            (item) => typeof item === "object" && item !== null && !Array.isArray(item),
+          )
+        ) {
+          throw new Error(`Saved ${key} data is not a valid array of records.`);
+        }
+        return parsed as Record<string, unknown>[];
+      };
+      const customersToMigrate = parseStoredArray(customerData, "customer");
+      const invoicesToMigrate = parseStoredArray(invoiceData, "invoice");
+      const withoutIds = (record: Record<string, unknown>) => {
+        const { id: _id, _id: _mongoId, ...payload } = record;
+        return payload;
+      };
+
+      for (const customer of customersToMigrate) {
+        const response = await fetch("/api/customers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(withoutIds(customer)),
+        });
+        const result: unknown = await response.json();
+        if (!response.ok) {
+          const message =
+            typeof result === "object" &&
+            result !== null &&
+            typeof (result as Record<string, unknown>).error === "string"
+              ? (result as Record<string, string>).error
+              : `Customer migration failed with status ${response.status}.`;
+          throw new Error(message);
+        }
+        if (
+          !isCustomer(result) ||
+          typeof (result as Record<string, unknown>)._id !== "string"
+        ) {
+          throw new Error("The customer API returned invalid migration data.");
+        }
+        migratedCustomerRecords.push(result);
+        migratedCustomers += 1;
+      }
+
+      for (const invoice of invoicesToMigrate) {
+        const customer =
+          typeof invoice.customer === "object" && invoice.customer !== null
+            ? withoutIds(invoice.customer as Record<string, unknown>)
+            : invoice.customer;
+        const invoicePayload = {
+          ...withoutIds(invoice),
+          invoiceDate: invoice.invoiceDate ?? invoice.date,
+          customerName: invoice.customerName ?? (customer as Customer | null)?.name,
+          customerState: invoice.customerState ?? (customer as Customer | null)?.state,
+          invoiceType: invoice.invoiceType ?? "GST",
+          taxableValue: invoice.taxableValue ?? invoice.subtotal,
+          cgst: invoice.cgst ?? invoice.cgstTotal,
+          sgst: invoice.sgst ?? invoice.sgstTotal,
+          igst: invoice.igst ?? invoice.igstTotal,
+          customer,
+          terms: typeof invoice.terms === "string" ? invoice.terms : "",
+          gstInclusive:
+            typeof invoice.gstInclusive === "boolean" ? invoice.gstInclusive : true,
+        };
+        const response = await fetch("/api/invoices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invoicePayload),
+        });
+        const result: unknown = await response.json();
+        if (!response.ok) {
+          const message =
+            typeof result === "object" &&
+            result !== null &&
+            typeof (result as Record<string, unknown>).error === "string"
+              ? (result as Record<string, string>).error
+              : `Invoice migration failed with status ${response.status}.`;
+          throw new Error(message);
+        }
+        if (!isMongoInvoice(result)) {
+          throw new Error("The invoice API returned invalid migration data.");
+        }
+        migratedInvoiceRecords.push(toSavedInvoice(result));
+        migratedInvoices += 1;
+      }
+
+      localStorage.removeItem("agc_customers");
+      localStorage.removeItem("agc_invoices");
+      setCustomers((currentCustomers) => [
+        ...migratedCustomerRecords,
+        ...currentCustomers,
+      ]);
+      setSavedInvoices((currentInvoices) => [
+        ...migratedInvoiceRecords,
+        ...currentInvoices,
+      ]);
+      window.alert(
+        `Migration complete. ${migratedCustomers} customer(s) and ${migratedInvoices} invoice(s) copied to MongoDB.`,
+      );
+    } catch (error) {
+      console.error("Could not migrate old LocalStorage records to MongoDB.", error);
+      window.alert(
+        `Migration stopped after ${migratedCustomers} customer(s) and ${migratedInvoices} invoice(s). The old data was kept in LocalStorage. Check the records already copied before retrying to avoid duplicates. ${
+          error instanceof Error ? error.message : "Please try again."
+        }`,
+      );
+    } finally {
+      setIsMigratingOldData(false);
+    }
+  }
 
   function updateDocketField(field: keyof DocketForm, value: string) {
     setForm((currentForm) => ({ ...currentForm, [field]: value }));
@@ -914,7 +1089,7 @@ export default function Home() {
     }
   }
 
-  function addCustomer(event: FormEvent<HTMLFormElement>) {
+  async function addCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const newCustomer: Customer = {
       name: customerForm.name.trim(),
@@ -929,41 +1104,90 @@ export default function Home() {
       stateCode: customerForm.stateCode?.trim() || "",
       pincode: customerForm.pincode?.trim() || "",
     };
-    const updatedCustomers = [...customers, newCustomer];
 
     try {
-      localStorage.setItem("agc_customers", JSON.stringify(updatedCustomers));
-    } catch (error) {
-      console.error("Could not save customer to localStorage.", error);
-      setCustomerError("Customer could not be saved. Check browser storage and try again.");
-      return;
-    }
+      const response = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newCustomer),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === "object" && result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "Customer could not be saved.";
+        throw new Error(message);
+      }
+      if (
+        !isCustomer(result) ||
+        typeof (result as Record<string, unknown>)._id !== "string"
+      ) {
+        throw new Error("The server returned invalid customer data.");
+      }
 
-    setCustomers(updatedCustomers);
-    setCustomerForm({ ...emptyCustomerForm });
-    setCustomerError("");
-    setIsAddingCustomer(false);
+      setCustomers((currentCustomers) => [
+        {
+          ...result,
+          gstin: result.gstin ?? "",
+          contactPerson: result.contactPerson ?? "",
+          email: result.email ?? "",
+          pan: result.pan ?? "",
+          city: result.city ?? "",
+          stateCode: result.stateCode ?? "",
+          pincode: result.pincode ?? "",
+        },
+        ...currentCustomers,
+      ]);
+      setCustomerForm({ ...emptyCustomerForm });
+      setCustomerError("");
+      setIsAddingCustomer(false);
+    } catch (error) {
+      console.error("Could not save customer to MongoDB.", error);
+      setCustomerError(
+        error instanceof Error ? error.message : "Customer could not be saved. Please try again.",
+      );
+    }
   }
 
-  function deleteCustomer(customerToDelete: Customer) {
-    const updatedCustomers = customers.filter((customer) => customer !== customerToDelete);
-
-    try {
-      localStorage.setItem("agc_customers", JSON.stringify(updatedCustomers));
-    } catch (error) {
-      console.error("Could not delete customer from localStorage.", error);
-      setCustomerError("Customer could not be deleted. Check browser storage and try again.");
+  async function deleteCustomer(customerToDelete: Customer) {
+    if (!customerToDelete._id) {
+      setCustomerError("This customer is missing its database ID. Refresh and try again.");
       return;
     }
 
-    setCustomers(updatedCustomers);
-    if (
-      selectedCustomer === customerToDelete.phone &&
-      !updatedCustomers.some((customer) => customer.phone === selectedCustomer)
-    ) {
-      setSelectedCustomer("");
+    try {
+      const response = await fetch(`/api/customers/${customerToDelete._id}`, {
+        method: "DELETE",
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === "object" && result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "Customer could not be deleted.";
+        throw new Error(message);
+      }
+
+      const updatedCustomers = customers.filter(
+        (customer) => customer._id !== customerToDelete._id,
+      );
+      setCustomers(updatedCustomers);
+      if (
+        selectedCustomer === customerToDelete.phone &&
+        !updatedCustomers.some((customer) => customer.phone === selectedCustomer)
+      ) {
+        setSelectedCustomer("");
+      }
+      setCustomerError("");
+    } catch (error) {
+      console.error("Could not delete customer from MongoDB.", error);
+      setCustomerError(
+        error instanceof Error ? error.message : "Customer could not be deleted. Please try again.",
+      );
     }
-    setCustomerError("");
   }
 
   function addCourierPartner(event: FormEvent<HTMLFormElement>) {
@@ -1115,7 +1339,7 @@ export default function Home() {
   }
 
   function editInvoice(invoice: SavedInvoice) {
-    setEditingInvoiceId(invoice.id);
+    setEditingInvoiceId(invoice._id);
     setActiveTab("invoices");
     setIsCreatingInvoice(true);
     setInvoiceDate(getDateInputValue(invoice.date));
@@ -1137,7 +1361,7 @@ export default function Home() {
     setInvoiceError("");
   }
 
-  function createInvoice() {
+  async function createInvoice() {
     if (!selectedCustomerRecord) {
       setInvoiceError("Select a customer before creating the invoice.");
       return;
@@ -1149,7 +1373,7 @@ export default function Home() {
 
     const generatedAt = new Date();
     const existingInvoice = editingInvoiceId
-      ? savedInvoices.find((savedInvoice) => savedInvoice.id === editingInvoiceId)
+      ? savedInvoices.find((savedInvoice) => savedInvoice._id === editingInvoiceId)
       : undefined;
     if (editingInvoiceId && !existingInvoice) {
       setInvoiceError("This invoice could not be found. Return to the invoice list and try again.");
@@ -1161,7 +1385,7 @@ export default function Home() {
         invoiceNo = existingInvoice.invoiceNo;
       } else {
         const existingInvoiceNumbers = savedInvoices
-          .filter((savedInvoice) => savedInvoice.id !== existingInvoice?.id)
+          .filter((savedInvoice) => savedInvoice._id !== existingInvoice?._id)
           .map((savedInvoice) => savedInvoice.invoiceNo);
         invoiceNo = createUniqueInvoiceNumber(existingInvoiceNumbers, invoiceType);
       }
@@ -1190,69 +1414,86 @@ export default function Home() {
       month: "short",
       year: "numeric",
     });
-    const invoice: SavedInvoice = {
-      id: existingInvoice?.id ?? `${generatedAt.getTime()}-${invoiceNo}`,
+    const invoicePayload = {
       invoiceNo,
-      date: formattedDate,
+      invoiceDate: formattedDate,
       dueDate,
-      customer: { ...selectedCustomerRecord },
+      customerName: selectedCustomerRecord.name,
+      customerState: selectedCustomerRecord.state,
       invoiceType,
       gstType: invoiceGstType,
       consignments: invoiceConsignments,
-      subtotal: invoiceTaxTotals.subtotal,
-      cgstTotal: invoiceTaxTotals.cgstTotal,
-      sgstTotal: invoiceTaxTotals.sgstTotal,
-      igstTotal: invoiceTaxTotals.igstTotal,
+      taxableValue: invoiceTaxTotals.subtotal,
+      cgst: invoiceTaxTotals.cgstTotal,
+      sgst: invoiceTaxTotals.sgstTotal,
+      igst: invoiceTaxTotals.igstTotal,
       totalAmount: invoiceTaxTotals.totalAmount,
       status: invoiceStatus,
       paymentStatus,
+      customer: { ...selectedCustomerRecord },
       terms: invoiceTerms,
       gstInclusive: true,
     };
-    const updatedInvoices = existingInvoice
-      ? savedInvoices.map((savedInvoice) =>
-          savedInvoice.id === existingInvoice.id ? invoice : savedInvoice,
-        )
-      : [invoice, ...savedInvoices];
 
     try {
-      localStorage.setItem("agc_invoices", JSON.stringify(updatedInvoices));
-    } catch (error) {
-      console.error("Could not save invoice to localStorage.", error);
-      if (isQuotaExceededError(error)) {
-        window.alert("Storage Full! Please delete some old invoices to save a new one.");
-        setInvoiceError("Storage is full. Delete some old invoices and try again.");
-        return;
+      const response = await fetch(
+        existingInvoice ? `/api/invoices/${existingInvoice._id}` : "/api/invoices",
+        {
+          method: existingInvoice ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invoicePayload),
+        },
+      );
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === "object" && result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "The invoice could not be saved.";
+        throw new Error(message);
       }
-      setInvoiceError("The invoice could not be saved. Check browser storage and try again.");
-      return;
-    }
+      if (!isMongoInvoice(result)) {
+        throw new Error("The server returned invalid invoice data.");
+      }
 
-    setSavedInvoices(updatedInvoices);
-    setPreviewInvoiceNo(
-      createUniqueInvoiceNumber(
-        updatedInvoices.map((savedInvoice) => savedInvoice.invoiceNo),
-        "GST",
-      ),
-    );
-    setInvoiceSuccess(
-      existingInvoice
-        ? `Invoice ${invoiceNo} updated successfully.`
-        : `Invoice ${invoiceNo} created successfully.`,
-    );
-    setInvoiceError("");
-    setDockets([]);
-    setForm({ ...emptyDocketForm });
-    const defaults = getInvoiceDateDefaults();
-    setInvoiceDate(defaults.invoiceDate);
-    setDueDate(defaults.dueDate);
-    setInvoiceType("GST");
-    setSelectedCustomer("");
-    setInvoiceTerms(getDefaultInvoiceTerms(companySettings.city));
-    setInvoiceStatus("Issued");
-    setPaymentStatus("Unpaid");
-    setEditingInvoiceId(null);
-    setIsCreatingInvoice(false);
+      const persistedInvoice = toSavedInvoice(result);
+      const updatedInvoices = existingInvoice
+        ? savedInvoices.map((savedInvoice) =>
+            savedInvoice._id === existingInvoice._id ? persistedInvoice : savedInvoice,
+          )
+        : [persistedInvoice, ...savedInvoices];
+      setSavedInvoices(updatedInvoices);
+      setPreviewInvoiceNo(
+        createUniqueInvoiceNumber(
+          updatedInvoices.map((savedInvoice) => savedInvoice.invoiceNo),
+          "GST",
+        ),
+      );
+      setInvoiceSuccess(
+        existingInvoice
+          ? `Invoice ${invoiceNo} updated successfully.`
+          : `Invoice ${invoiceNo} created successfully.`,
+      );
+      setInvoiceError("");
+      setDockets([]);
+      setForm({ ...emptyDocketForm });
+      const defaults = getInvoiceDateDefaults();
+      setInvoiceDate(defaults.invoiceDate);
+      setDueDate(defaults.dueDate);
+      setInvoiceType("GST");
+      setSelectedCustomer("");
+      setInvoiceTerms(getDefaultInvoiceTerms(companySettings.city));
+      setInvoiceStatus("Issued");
+      setPaymentStatus("Unpaid");
+      setEditingInvoiceId(null);
+      setIsCreatingInvoice(false);
+    } catch (error) {
+      console.error("Could not save invoice to MongoDB.", error);
+      setInvoiceError(
+        error instanceof Error ? error.message : "The invoice could not be saved. Please try again.",
+      );
+    }
   }
 
   function printSavedInvoice(invoice: SavedInvoice) {
@@ -1334,23 +1575,33 @@ export default function Home() {
     }
   }
 
-  function deleteInvoice(invoiceId: string) {
+  async function deleteInvoice(invoiceId: string) {
     if (!window.confirm("Are you sure you want to delete this invoice?")) {
       return;
     }
 
-    const updatedInvoices = savedInvoices.filter((invoice) => invoice.id !== invoiceId);
-
     try {
-      localStorage.setItem("agc_invoices", JSON.stringify(updatedInvoices));
-    } catch (error) {
-      console.error("Could not update saved invoices in localStorage.", error);
-      setInvoiceError("The invoice could not be deleted. Check browser storage and try again.");
-      return;
-    }
+      const response = await fetch(`/api/invoices/${invoiceId}`, { method: "DELETE" });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === "object" && result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "The invoice could not be deleted.";
+        throw new Error(message);
+      }
 
-    setSavedInvoices(updatedInvoices);
-    setInvoiceError("");
+      setSavedInvoices((currentInvoices) =>
+        currentInvoices.filter((invoice) => invoice._id !== invoiceId),
+      );
+      setInvoiceError("");
+    } catch (error) {
+      console.error("Could not delete invoice from MongoDB.", error);
+      setInvoiceError(
+        error instanceof Error ? error.message : "The invoice could not be deleted. Please try again.",
+      );
+    }
   }
 
   function login(event: FormEvent<HTMLFormElement>) {
@@ -1582,6 +1833,14 @@ export default function Home() {
                       </h1>
                     </div>
                     <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void migrateOldDataToDB()}
+                        disabled={isMigratingOldData}
+                        className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isMigratingOldData ? "Migrating..." : "Migrate Old Data"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => setActiveTab("settings")}
@@ -1919,7 +2178,7 @@ export default function Home() {
                       {editingInvoiceId ? "INVOICE #:" : "NEXT #:"}{" "}
                       <span className="text-gray-900">
                         {editingInvoiceId
-                          ? savedInvoices.find((invoice) => invoice.id === editingInvoiceId)
+                          ? savedInvoices.find((invoice) => invoice._id === editingInvoiceId)
                               ?.invoiceNo ?? previewInvoiceNo
                           : previewInvoiceNo}
                       </span>
@@ -2439,7 +2698,16 @@ export default function Home() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {filteredInvoices.length === 0 ? (
+                          {isLoadingData ? (
+                            <tr>
+                              <td colSpan={8} className="px-5 py-14 text-center text-slate-500">
+                                <span role="status" className="inline-flex items-center gap-2">
+                                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                                  Loading invoices...
+                                </span>
+                              </td>
+                            </tr>
+                          ) : filteredInvoices.length === 0 ? (
                             <tr>
                               <td colSpan={8} className="px-5 py-14 text-center">
                                 <p className="font-medium text-slate-700">
@@ -2456,7 +2724,7 @@ export default function Home() {
                             </tr>
                           ) : (
                             filteredInvoices.map((invoice) => (
-                              <tr key={invoice.id} className="transition hover:bg-slate-50">
+                              <tr key={invoice._id} className="transition hover:bg-slate-50">
                                 <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">
                                   {invoice.invoiceNo}
                                 </td>
@@ -2519,7 +2787,7 @@ export default function Home() {
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => deleteInvoice(invoice.id)}
+                                      onClick={() => deleteInvoice(invoice._id)}
                                       className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50"
                                     >
                                       Delete
@@ -2585,7 +2853,16 @@ export default function Home() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {customers.length === 0 ? (
+                          {isLoadingData ? (
+                            <tr>
+                              <td colSpan={5} className="px-5 py-14 text-center text-slate-500">
+                                <span role="status" className="inline-flex items-center gap-2">
+                                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                                  Loading customers...
+                                </span>
+                              </td>
+                            </tr>
+                          ) : customers.length === 0 ? (
                             <tr>
                               <td colSpan={5} className="px-5 py-14 text-center">
                                 <p className="font-medium text-slate-700">No customers yet</p>
@@ -2597,7 +2874,7 @@ export default function Home() {
                           ) : (
                             customers.map((customer, index) => (
                               <tr
-                                key={`${customer.phone}-${index}`}
+                                key={customer._id ?? `${customer.phone}-${index}`}
                                 className="transition hover:bg-slate-50"
                               >
                                 <td className="px-5 py-4 font-semibold text-slate-900">
@@ -2903,7 +3180,7 @@ export default function Home() {
                                   : invoice.cgstTotal + invoice.sgstTotal + invoice.igstTotal;
 
                               return (
-                                <tr key={invoice.id} className="transition hover:bg-slate-50">
+                                <tr key={invoice._id} className="transition hover:bg-slate-50">
                                   <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">
                                     {invoice.invoiceNo}
                                   </td>
