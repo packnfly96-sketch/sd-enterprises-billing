@@ -55,6 +55,7 @@ const invoiceSchema = new Schema(
     customer: { type: customerSnapshotSchema, required: true },
     terms: { type: String, required: true, default: "" },
     gstInclusive: { type: Boolean, default: true },
+    createdBy: { type: String, trim: true },
   },
   { timestamps: true },
 );

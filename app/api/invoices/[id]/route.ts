@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 
@@ -26,11 +27,16 @@ function isInvoicePayload(value: unknown): value is Record<string, unknown> {
     typeof invoice.paymentStatus === "string" &&
     Array.isArray(invoice.consignments) &&
     typeof invoice.customer === "object" &&
-    invoice.customer !== null
+    invoice.customer !== null &&
+    (invoice.createdBy === undefined || typeof invoice.createdBy === "string")
   );
 }
 
 export async function PUT(request: Request, { params }: RouteContext) {
+  const sessionUser = getSessionUser(request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
   if (!Types.ObjectId.isValid(params.id)) {
     return NextResponse.json({ error: "Invalid invoice ID." }, { status: 400 });
   }
@@ -42,7 +48,12 @@ export async function PUT(request: Request, { params }: RouteContext) {
     }
 
     await connectToDatabase();
-    const invoice = await Invoice.findByIdAndUpdate(params.id, invoiceData, {
+    const { createdBy: _untrustedCreatedBy, ...editableInvoice } = invoiceData;
+    const filter =
+      sessionUser.role === "admin"
+        ? { _id: params.id }
+        : { _id: params.id, createdBy: sessionUser.email };
+    const invoice = await Invoice.findOneAndUpdate(filter, editableInvoice, {
       new: true,
       runValidators: true,
     });
@@ -63,13 +74,21 @@ export async function PUT(request: Request, { params }: RouteContext) {
 }
 
 export async function DELETE(_request: Request, { params }: RouteContext) {
+  const sessionUser = getSessionUser(_request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
   if (!Types.ObjectId.isValid(params.id)) {
     return NextResponse.json({ error: "Invalid invoice ID." }, { status: 400 });
   }
 
   try {
     await connectToDatabase();
-    const invoice = await Invoice.findByIdAndDelete(params.id);
+    const filter =
+      sessionUser.role === "admin"
+        ? { _id: params.id }
+        : { _id: params.id, createdBy: sessionUser.email };
+    const invoice = await Invoice.findOneAndDelete(filter);
     if (!invoice) {
       return NextResponse.json({ error: "Invoice not found." }, { status: 404 });
     }

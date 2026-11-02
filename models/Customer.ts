@@ -13,6 +13,7 @@ const customerSchema = new Schema(
     city: { type: String, default: "", trim: true },
     stateCode: { type: String, default: "", trim: true },
     pincode: { type: String, default: "", trim: true },
+    createdBy: { type: String, trim: true },
   },
   { timestamps: true },
 );

@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import QRCode from "react-qr-code";
 import { useReactToPrint } from "react-to-print";
 import * as XLSX from "xlsx";
@@ -74,6 +75,12 @@ type AuthCredentials = {
   password: string;
 };
 
+type LoggedInUser = {
+  name: string;
+  email: string;
+  role: "admin" | "sub-user";
+};
+
 type CompanySettings = {
   name: string;
   gstin: string;
@@ -137,7 +144,22 @@ type MongoInvoice = {
   gstInclusive: boolean;
 };
 
-type ActiveTab = "dashboard" | "invoices" | "customers" | "couriers" | "reports" | "settings";
+type ActiveTab =
+  | "dashboard"
+  | "invoices"
+  | "customers"
+  | "couriers"
+  | "reports"
+  | "settings"
+  | "team";
+
+type TeamUser = {
+  _id: string;
+  name: string;
+  email: string;
+  role: "admin" | "sub-user";
+  createdAt?: string;
+};
 
 const emptyDocketForm: DocketForm = {
   docketNo: "",
@@ -245,6 +267,7 @@ const navigationItems: { id: ActiveTab; label: string }[] = [
   { id: "couriers", label: "Courier Partners" },
   { id: "reports", label: "Reports" },
   { id: "settings", label: "Settings" },
+  { id: "team", label: "Team" },
 ];
 
 const currencyFormatter = new Intl.NumberFormat("en-IN", {
@@ -470,6 +493,30 @@ function isAuthCredentials(value: unknown): value is AuthCredentials {
   return typeof credentials.email === "string" && typeof credentials.password === "string";
 }
 
+function isLoggedInUser(value: unknown): value is LoggedInUser {
+  if (typeof value !== "object" || value === null) return false;
+  const user = value as Record<string, unknown>;
+
+  return (
+    typeof user.name === "string" &&
+    typeof user.email === "string" &&
+    (user.role === "admin" || user.role === "sub-user")
+  );
+}
+
+function isTeamUser(value: unknown): value is TeamUser {
+  if (typeof value !== "object" || value === null) return false;
+  const user = value as Record<string, unknown>;
+
+  return (
+    typeof user._id === "string" &&
+    typeof user.name === "string" &&
+    typeof user.email === "string" &&
+    (user.role === "admin" || user.role === "sub-user") &&
+    (user.createdAt === undefined || typeof user.createdAt === "string")
+  );
+}
+
 function isMongoInvoice(value: unknown): value is MongoInvoice {
   if (typeof value !== "object" || value === null) return false;
   const invoice = value as Record<string, unknown>;
@@ -560,6 +607,12 @@ function NavIcon({ name }: { name: ActiveTab }) {
         <path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a7.8 7.8 0 0 1-1.5.9l-.3 1.8h-2.8l-.3-1.8a7.8 7.8 0 0 1-1.5-.9l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-1.8l-1.4-1.1 1.4-2.4 1.7.6a7.8 7.8 0 0 1 1.5-.9l.3-1.8h2.8l.3 1.8a7.8 7.8 0 0 1 1.5.9l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 1.8Z" />
       </>
     ),
+    team: (
+      <>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3.5 20v-1.5a5.5 5.5 0 0 1 11 0V20ZM16 5.25a3.25 3.25 0 0 1 0 6.25M17 14a4.75 4.75 0 0 1 3.5 4.58V20" />
+      </>
+    ),
   };
 
   return (
@@ -580,9 +633,11 @@ function NavIcon({ name }: { name: ActiveTab }) {
 
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -590,6 +645,16 @@ export default function Home() {
   const [securitySuccess, setSecuritySuccess] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>("all");
+  const [teamUsers, setTeamUsers] = useState<TeamUser[]>([]);
+  const [isLoadingTeamUsers, setIsLoadingTeamUsers] = useState(false);
+  const [isAddingTeamUser, setIsAddingTeamUser] = useState(false);
+  const [teamError, setTeamError] = useState("");
+  const [teamForm, setTeamForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "sub-user" as LoggedInUser["role"],
+  });
   const [courierPartners, setCourierPartners] = useState<CourierPartner[]>([]);
   const [isAddingCourierPartner, setIsAddingCourierPartner] = useState(false);
   const [courierPartnerForm, setCourierPartnerForm] = useState(emptyCourierPartnerForm);
@@ -756,17 +821,6 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      setIsLoggedIn(localStorage.getItem("agc_logged_in") === "true");
-      const storedAuth = localStorage.getItem("agc_auth");
-      if (storedAuth) {
-        const parsedAuth: unknown = JSON.parse(storedAuth);
-        if (isAuthCredentials(parsedAuth)) {
-          setLoginEmail(parsedAuth.email);
-        } else {
-          console.error("Saved account credentials in localStorage have an invalid format.");
-        }
-      }
-
       const storedCouriers = localStorage.getItem("agc_couriers");
       if (storedCouriers) {
         const parsedCouriers: unknown = JSON.parse(storedCouriers);
@@ -803,6 +857,45 @@ export default function Home() {
   useEffect(() => {
     let active = true;
 
+    async function restoreSession() {
+      try {
+        const response = await fetch("/api/auth/me");
+        const result: unknown = await response.json();
+        const user =
+          typeof result === "object" && result !== null
+            ? (result as Record<string, unknown>).user
+            : null;
+
+        if (!active) return;
+        if (!response.ok || !isLoggedInUser(user)) {
+          localStorage.removeItem("agc_user");
+          setLoggedInUser(null);
+          setIsLoggedIn(false);
+          return;
+        }
+
+        localStorage.setItem("agc_user", JSON.stringify(user));
+        setLoggedInUser(user);
+        setLoginEmail(user.email);
+        setIsLoggedIn(true);
+      } catch (error) {
+        if (!active) return;
+        console.error("Could not verify the saved server session.", error);
+        localStorage.removeItem("agc_user");
+        setLoggedInUser(null);
+        setIsLoggedIn(false);
+      }
+    }
+
+    void restoreSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
     async function fetchCollection(url: string) {
       const response = await fetch(url);
       const data: unknown = await response.json();
@@ -818,6 +911,13 @@ export default function Home() {
     }
 
     async function loadData() {
+      if (!loggedInUser) {
+        setIsLoadingData(false);
+        setSavedInvoices([]);
+        setCustomers([]);
+        return;
+      }
+      setIsLoadingData(true);
       const [invoicesResult, customersResult] = await Promise.allSettled([
         fetchCollection("/api/invoices"),
         fetchCollection("/api/customers"),
@@ -876,7 +976,48 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loggedInUser]);
+
+  useEffect(() => {
+    if (activeTab !== "team" || loggedInUser?.role !== "admin") return;
+    let active = true;
+    setIsLoadingTeamUsers(true);
+    setTeamError("");
+
+    async function loadTeamUsers() {
+      try {
+        const response = await fetch("/api/auth/users");
+        const result: unknown = await response.json();
+        if (!response.ok) {
+          const message =
+            typeof result === "object" &&
+            result !== null &&
+            typeof (result as Record<string, unknown>).error === "string"
+              ? (result as Record<string, string>).error
+              : "Could not load team users.";
+          throw new Error(message);
+        }
+        if (
+          !Array.isArray(result) ||
+          !result.every(isTeamUser)
+        ) {
+          throw new Error("The users API returned invalid data.");
+        }
+        if (active) setTeamUsers(result);
+      } catch (error) {
+        if (!active) return;
+        console.error("Could not load team users.", error);
+        setTeamError(error instanceof Error ? error.message : "Could not load team users.");
+      } finally {
+        if (active) setIsLoadingTeamUsers(false);
+      }
+    }
+
+    void loadTeamUsers();
+    return () => {
+      active = false;
+    };
+  }, [activeTab, loggedInUser]);
 
   useEffect(() => {
     if (autoPrintInvoice && selectedPrintInvoice) {
@@ -1604,42 +1745,97 @@ export default function Home() {
     }
   }
 
-  function login(event: FormEvent<HTMLFormElement>) {
+  async function addTeamUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setTeamError("");
+
     try {
-      const storedAuth = localStorage.getItem("agc_auth");
-      let isValidLogin = false;
-      if (storedAuth) {
-        const credentials: unknown = JSON.parse(storedAuth);
-        if (!isAuthCredentials(credentials)) {
-          console.error("Saved account credentials in localStorage have an invalid format.");
-          setLoginError("Saved account credentials are invalid. Contact your administrator.");
-          return;
-        }
-        isValidLogin =
-          username.trim().toLocaleLowerCase() === credentials.email.trim().toLocaleLowerCase() &&
-          password === credentials.password;
-      } else {
-        isValidLogin = username === "admin" && password === "admin123";
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(teamForm),
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const message =
+          typeof result === "object" &&
+          result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "Could not create user.";
+        throw new Error(message);
       }
 
-      if (isValidLogin) {
-        localStorage.setItem("agc_logged_in", "true");
-        setIsLoggedIn(true);
-        setLoginError("");
+      const user =
+        typeof result === "object" && result !== null
+          ? (result as Record<string, unknown>).user
+          : null;
+      if (!isTeamUser(user)) {
+        throw new Error("The registration API returned invalid user data.");
+      }
+
+      setTeamUsers((currentUsers) => [...currentUsers, user]);
+      setTeamForm({ name: "", email: "", password: "", role: "sub-user" });
+      setIsAddingTeamUser(false);
+    } catch (error) {
+      console.error("Could not create a team user.", error);
+      setTeamError(error instanceof Error ? error.message : "Could not create user.");
+    }
+  }
+
+  async function login(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsLoggingIn(true);
+    setLoginError("");
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: username.trim(), password }),
+      });
+      const result: unknown = await response.json();
+
+      if (!response.ok) {
+        const message =
+          typeof result === "object" &&
+          result !== null &&
+          typeof (result as Record<string, unknown>).error === "string"
+            ? (result as Record<string, string>).error
+            : "Login could not be verified. Please try again.";
+        setLoginError(message);
         return;
       }
-    } catch (error) {
-      console.error("Could not read account credentials during login.", error);
-      setLoginError("Login could not be verified. Check browser storage and try again.");
-      return;
-    }
 
-    setLoginError("Incorrect username or password.");
+      const user =
+        typeof result === "object" && result !== null
+          ? (result as Record<string, unknown>).user
+          : null;
+      if (!isLoggedInUser(user)) {
+        throw new Error("The login service returned invalid user data.");
+      }
+
+      localStorage.setItem("agc_user", JSON.stringify(user));
+      setLoggedInUser(user);
+      setLoginEmail(user.email);
+      setIsLoggedIn(true);
+      setPassword("");
+    } catch (error) {
+      console.error("Could not complete database-backed login.", error);
+      setLoginError(
+        error instanceof Error ? error.message : "Login could not be verified. Please try again.",
+      );
+    } finally {
+      setIsLoggingIn(false);
+    }
   }
 
   function logout() {
-    localStorage.removeItem("agc_logged_in");
+    void fetch("/api/auth/logout", { method: "POST" }).catch((error: unknown) => {
+      console.error("Could not end the server session.", error);
+    });
+    localStorage.removeItem("agc_user");
+    setLoggedInUser(null);
     setIsLoggedIn(false);
   }
 
@@ -1681,13 +1877,14 @@ export default function Home() {
           </div>
           <form onSubmit={login} className="space-y-5">
             <label className="block text-sm font-medium text-slate-700">
-              Login Email or Username
+              Login Email
               <input
                 required
-                type="text"
+                type="email"
                 autoComplete="username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
+                disabled={isLoggingIn}
                 className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               />
             </label>
@@ -1699,6 +1896,7 @@ export default function Home() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                disabled={isLoggingIn}
                 className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
               />
             </label>
@@ -1709,9 +1907,10 @@ export default function Home() {
             )}
             <button
               type="submit"
+              disabled={isLoggingIn}
               className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
             >
-              Login
+              {isLoggingIn ? "Signing in..." : "Login"}
             </button>
           </form>
         </section>
@@ -1749,37 +1948,43 @@ export default function Home() {
               Workspace
             </p>
             <nav className="mt-3 flex-1 space-y-1" aria-label="Main navigation">
-              {navigationItems.map((item) => {
-                const isActive = activeTab === item.id;
+              {navigationItems
+                .filter((item) => item.id !== "team" || loggedInUser?.role === "admin")
+                .map((item) => {
+                  const isActive = activeTab === item.id;
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      if (item.id === "invoices") {
-                        setIsCreatingInvoice(false);
-                        setInvoiceSuccess("");
-                        setInvoiceError("");
-                      }
-                      if (item.id === "customers") {
-                        setIsAddingCustomer(false);
-                        setCustomerError("");
-                      }
-                    }}
-                    aria-current={isActive ? "page" : undefined}
-                    className={`flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-left text-sm font-medium transition ${
-                      isActive
-                        ? "border-blue-400 bg-blue-600 text-white shadow-sm"
-                        : "border-transparent text-slate-400 hover:bg-slate-800 hover:text-white"
-                    }`}
-                  >
-                    <NavIcon name={item.id} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        if (item.id === "team") {
+                          setIsAddingTeamUser(false);
+                          setTeamError("");
+                        }
+                        if (item.id === "invoices") {
+                          setIsCreatingInvoice(false);
+                          setInvoiceSuccess("");
+                          setInvoiceError("");
+                        }
+                        if (item.id === "customers") {
+                          setIsAddingCustomer(false);
+                          setCustomerError("");
+                        }
+                      }}
+                      aria-current={isActive ? "page" : undefined}
+                      className={`flex w-full items-center gap-3 rounded-lg border-l-2 px-3 py-2.5 text-left text-sm font-medium transition ${
+                        isActive
+                          ? "border-blue-400 bg-blue-600 text-white shadow-sm"
+                          : "border-transparent text-slate-400 hover:bg-slate-800 hover:text-white"
+                      }`}
+                    >
+                      <NavIcon name={item.id} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
             </nav>
 
             <div className="border-t border-slate-800 pt-4">
@@ -1803,7 +2008,7 @@ export default function Home() {
                 Logout
               </button>
               <p className="mt-4 truncate px-3 text-[11px] text-slate-500">
-                admin@sdenterprises.in
+                {loggedInUser?.email}
               </p>
             </div>
           </aside>
@@ -1811,11 +2016,16 @@ export default function Home() {
           <div className="ml-64 min-h-screen">
             <header className="flex h-[68px] items-center justify-end border-b border-slate-200 bg-white px-6 sm:px-8">
               <div className="flex items-center gap-3">
-                <span className="hidden text-sm text-slate-600 sm:inline">
-                  Signed in as <span className="font-medium text-slate-800">admin@sdenterprises.in</span>
+                <span className="text-right text-sm text-slate-600">
+                  <span className="block font-medium text-slate-800">
+                    {loggedInUser?.name}
+                  </span>
+                  <span className="block text-xs capitalize text-slate-500">
+                    {loggedInUser?.role === "admin" ? "Admin" : "Sub-user"}
+                  </span>
                 </span>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white ring-4 ring-blue-50">
-                  A
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold uppercase text-white ring-4 ring-blue-50">
+                  {loggedInUser?.name.charAt(0) ?? "U"}
                 </span>
               </div>
             </header>
@@ -2156,6 +2366,214 @@ export default function Home() {
                     </section>
                   </div>
                 </>
+              )}
+
+              {activeTab === "team" && loggedInUser?.role === "admin" && (
+                <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-5 sm:px-6">
+                    <div>
+                      <p className="text-[11px] font-bold tracking-[0.16em] text-slate-500">
+                        ADMINISTRATION
+                      </p>
+                      <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">
+                        Team
+                      </h1>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Manage users who can access the billing workspace.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamForm({ name: "", email: "", password: "", role: "sub-user" });
+                        setTeamError("");
+                        setIsAddingTeamUser(true);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                    >
+                      <span className="text-lg leading-none">+</span>
+                      Add User
+                    </button>
+                  </div>
+
+                  {teamError && !isAddingTeamUser && (
+                    <p role="alert" className="mx-5 mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700 sm:mx-6">
+                      {teamError}
+                    </p>
+                  )}
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[700px] border-collapse text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          {["Name", "Email", "Role"].map((heading) => (
+                            <th
+                              key={heading}
+                              className="border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide"
+                            >
+                              {heading}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {isLoadingTeamUsers ? (
+                          <tr>
+                            <td colSpan={3} className="px-5 py-14 text-center text-slate-500">
+                              <span role="status" className="inline-flex items-center gap-2">
+                                <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                                Loading users...
+                              </span>
+                            </td>
+                          </tr>
+                        ) : teamUsers.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="px-5 py-14 text-center text-slate-500">
+                              No users found.
+                            </td>
+                          </tr>
+                        ) : (
+                          teamUsers.map((user) => (
+                            <tr key={user._id}>
+                              <td className="px-5 py-4 font-semibold text-slate-900">
+                                {user.name}
+                              </td>
+                              <td className="px-5 py-4 text-slate-600">{user.email}</td>
+                              <td className="px-5 py-4">
+                                <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium capitalize text-blue-700">
+                                  {user.role === "admin" ? "Admin" : "Sub-user"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {isAddingTeamUser &&
+                    createPortal(
+                      <div
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                        onMouseDown={(event) => {
+                          if (event.target === event.currentTarget) setIsAddingTeamUser(false);
+                        }}
+                      >
+                        <section
+                          role="dialog"
+                          aria-modal="true"
+                          aria-labelledby="add-team-user-title"
+                          className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <h2 id="add-team-user-title" className="text-xl font-bold text-slate-900">
+                                Add User
+                              </h2>
+                              <p className="mt-1 text-sm text-slate-500">
+                                Create login credentials for a team member.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              aria-label="Close dialog"
+                              onClick={() => setIsAddingTeamUser(false)}
+                              className="rounded-md p-1 text-xl leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <form onSubmit={addTeamUser} className="mt-5 space-y-4">
+                            <label className="block text-sm font-medium text-slate-700">
+                              Name
+                              <input
+                                required
+                                autoComplete="name"
+                                value={teamForm.name}
+                                onChange={(event) =>
+                                  setTeamForm((formState) => ({
+                                    ...formState,
+                                    name: event.target.value,
+                                  }))
+                                }
+                                className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Email
+                              <input
+                                required
+                                type="email"
+                                autoComplete="email"
+                                value={teamForm.email}
+                                onChange={(event) =>
+                                  setTeamForm((formState) => ({
+                                    ...formState,
+                                    email: event.target.value,
+                                  }))
+                                }
+                                className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Password
+                              <input
+                                required
+                                type="password"
+                                minLength={8}
+                                autoComplete="new-password"
+                                value={teamForm.password}
+                                onChange={(event) =>
+                                  setTeamForm((formState) => ({
+                                    ...formState,
+                                    password: event.target.value,
+                                  }))
+                                }
+                                className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </label>
+                            <label className="block text-sm font-medium text-slate-700">
+                              Role
+                              <select
+                                value={teamForm.role}
+                                onChange={(event) =>
+                                  setTeamForm((formState) => ({
+                                    ...formState,
+                                    role: event.target.value as LoggedInUser["role"],
+                                  }))
+                                }
+                                className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              >
+                                <option value="sub-user">Sub-user</option>
+                                <option value="admin">Admin</option>
+                              </select>
+                            </label>
+                            {teamError && (
+                              <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+                                {teamError}
+                              </p>
+                            )}
+                            <div className="flex justify-end gap-3 pt-2">
+                              <button
+                                type="button"
+                                onClick={() => setIsAddingTeamUser(false)}
+                                className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                              >
+                                Save User
+                              </button>
+                            </div>
+                          </form>
+                        </section>
+                      </div>,
+                      document.body,
+                    )}
+                </section>
               )}
 
               {activeTab === "invoices" && (

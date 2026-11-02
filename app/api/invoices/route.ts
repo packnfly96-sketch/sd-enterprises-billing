@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
 import connectToDatabase from "@/lib/mongodb";
 import Invoice from "@/models/Invoice";
 
@@ -23,14 +24,21 @@ function isInvoicePayload(value: unknown): value is Record<string, unknown> {
     typeof invoice.paymentStatus === "string" &&
     Array.isArray(invoice.consignments) &&
     typeof invoice.customer === "object" &&
-    invoice.customer !== null
+    invoice.customer !== null &&
+    (invoice.createdBy === undefined || typeof invoice.createdBy === "string")
   );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const sessionUser = getSessionUser(request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   try {
     await connectToDatabase();
-    const invoices = await Invoice.find().sort({ createdAt: -1 }).lean();
+    const filter = sessionUser.role === "admin" ? {} : { createdBy: sessionUser.email };
+    const invoices = await Invoice.find(filter).sort({ createdAt: -1 }).lean();
     return NextResponse.json(invoices);
   } catch (error) {
     console.error("Could not fetch invoices from MongoDB.", error);
@@ -39,6 +47,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const sessionUser = getSessionUser(request);
+  if (!sessionUser) {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+
   try {
     const invoiceData: unknown = await request.json();
     if (!isInvoicePayload(invoiceData)) {
@@ -46,7 +59,10 @@ export async function POST(request: Request) {
     }
 
     await connectToDatabase();
-    const invoice = await Invoice.create(invoiceData);
+    const invoice = await Invoice.create({
+      ...invoiceData,
+      createdBy: sessionUser.email,
+    });
     return NextResponse.json(invoice.toObject(), { status: 201 });
   } catch (error) {
     console.error("Could not create invoice in MongoDB.", error);
