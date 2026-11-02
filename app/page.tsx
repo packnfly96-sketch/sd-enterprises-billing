@@ -9,8 +9,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "react-qr-code";
+import Select, { type StylesConfig } from "react-select";
 import { useReactToPrint } from "react-to-print";
 import * as XLSX from "xlsx";
+import { cities } from "../data/cities";
 import {
   Area,
   AreaChart,
@@ -20,6 +22,56 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
+type CityOption = {
+  value: string;
+  label: string;
+};
+
+const cityOptions: CityOption[] = cities.map((city) => ({
+  value: city,
+  label: city,
+}));
+
+const destinationSelectStyles: StylesConfig<CityOption, false> = {
+  control: (provided, state) => ({
+    ...provided,
+    minHeight: "32px",
+    borderColor: state.isFocused ? "#3b82f6" : "#d1d5db",
+    borderRadius: "0.375rem",
+    boxShadow: state.isFocused ? "0 0 0 2px #dbeafe" : "none",
+    fontSize: "0.75rem",
+    "&:hover": {
+      borderColor: state.isFocused ? "#3b82f6" : "#d1d5db",
+    },
+  }),
+  valueContainer: (provided) => ({
+    ...provided,
+    minWidth: 0,
+    padding: "0 0.5rem",
+  }),
+  input: (provided) => ({
+    ...provided,
+    margin: 0,
+    padding: 0,
+  }),
+  indicatorsContainer: (provided) => ({
+    ...provided,
+    height: "30px",
+  }),
+  dropdownIndicator: (provided) => ({
+    ...provided,
+    padding: "0 0.25rem",
+  }),
+  clearIndicator: (provided) => ({
+    ...provided,
+    padding: "0 0.25rem",
+  }),
+  menu: (provided) => ({
+    ...provided,
+    zIndex: 20,
+  }),
+};
 
 type Docket = {
   docketNo: string;
@@ -1195,17 +1247,22 @@ export default function Home() {
     saveDocket();
   }
 
-  function handleDocketInputKeyDown(
-    event: ReactKeyboardEvent<HTMLInputElement>,
-  ) {
+  function handleDocketInputKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
     if (event.key !== "Enter") return;
 
     event.preventDefault();
-    const rowFields = event.currentTarget
+    const currentField =
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement
+        ? event.target
+        : null;
+    if (!currentField) return;
+
+    const rowFields = currentField
       .closest("tr")
       ?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input, select");
     const currentIndex = rowFields
-      ? Array.from(rowFields).indexOf(event.currentTarget)
+      ? Array.from(rowFields).indexOf(currentField)
       : -1;
     const nextField = rowFields?.[currentIndex + 1];
 
@@ -1214,7 +1271,7 @@ export default function Home() {
       return;
     }
 
-    if (event.currentTarget.form?.reportValidity()) {
+    if (currentField.form?.reportValidity()) {
       saveDocket();
     }
   }
@@ -2873,16 +2930,32 @@ export default function Home() {
                                   />
                                 </td>
                                 <td className="px-2 py-2">
-                                  <input
+                                  <Select<CityOption, false>
                                     required
+                                    inputId="destination-input"
                                     aria-label="Destination"
-                                    onKeyDown={handleDocketInputKeyDown}
-                                    value={form.destination}
-                                    onChange={(event) =>
-                                      updateDocketField("destination", event.target.value)
+                                    options={cityOptions}
+                                    isSearchable
+                                    value={
+                                      cityOptions.find(
+                                        (option) => option.value === form.destination,
+                                      ) ?? null
                                     }
+                                    onChange={(option) =>
+                                      updateDocketField("destination", option?.value ?? "")
+                                    }
+                                    onKeyDown={(event) => {
+                                      if (
+                                        event.key === "Enter" &&
+                                        event.target instanceof HTMLElement &&
+                                        event.target.getAttribute("aria-expanded") === "true"
+                                      ) {
+                                        return;
+                                      }
+                                      handleDocketInputKeyDown(event);
+                                    }}
+                                    styles={destinationSelectStyles}
                                     placeholder="Destination"
-                                    className="w-full min-w-0 rounded-md border border-gray-300 px-2 py-2 text-xs outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                                   />
                                 </td>
                                 <td className="px-2 py-2">
