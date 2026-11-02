@@ -4252,6 +4252,7 @@ export default function Home() {
                 {[
                   "S.No.",
                   "Docket No.",
+                  "Date",
                   "Destination",
                   "Courier",
                   "Wt.",
@@ -4281,6 +4282,7 @@ export default function Home() {
                     <tr key={`${docket.docketNo}-${index}`} className="print:break-inside-avoid">
                       <td className="border border-gray-200 p-3 text-center print:p-1">{index + 1}</td>
                       <td className="break-words border border-gray-200 p-3 print:p-1">{docket.docketNo}</td>
+                      <td className="whitespace-nowrap border border-gray-200 p-3 print:p-1">{docket.date}</td>
                       <td className="break-words border border-gray-200 p-3 print:p-1">{docket.destination}</td>
                       <td className="break-words border border-gray-200 p-3 print:p-1">{docket.courier}</td>
                       <td className="border border-gray-200 p-3 print:p-1">{docket.weight}</td>
@@ -4294,7 +4296,7 @@ export default function Home() {
               ) : (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="border border-gray-200 p-4 text-center text-slate-500"
                   >
                     No dockets added.
@@ -4414,6 +4416,9 @@ export default function Home() {
             </section>
             <p className="mt-10 border-t border-gray-200 pt-4 text-center text-sm text-slate-500 print:mt-2 print:pt-2">
               Thank you for your business!
+            </p>
+            <p className="mt-1 text-center text-xs text-gray-500">
+              This is a computer generated invoice.
             </p>
           </footer>
         </div>
