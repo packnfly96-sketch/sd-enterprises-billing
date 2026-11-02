@@ -1863,56 +1863,185 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-800 print:min-h-0 print:bg-white print:p-0 print:text-black">
       {!isLoggedIn ? (
-        <section className="mx-auto mt-10 w-[calc(100%-2rem)] max-w-md rounded-2xl bg-white p-6 shadow-lg shadow-slate-200/70 ring-1 ring-slate-200 sm:mt-16 sm:p-8 print:hidden">
-          <div className="mb-7 text-center">
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-blue-600">
-              SD Enterprises Billing Suite
-            </p>
-            <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-              Sign in to your account
-            </h1>
-            <p className="mt-2 text-sm text-slate-500">
-              Enter your credentials to manage courier bills.
+        <section className="grid min-h-screen w-full bg-white md:grid-cols-2 print:hidden">
+          <div className="relative hidden min-h-screen overflow-hidden bg-gradient-to-br from-blue-900 to-slate-900 px-12 py-16 text-white md:flex md:flex-col md:justify-between lg:px-20">
+            <div
+              aria-hidden="true"
+              className="absolute -left-36 -top-32 h-[28rem] w-[28rem] rounded-full bg-blue-500/20 blur-3xl"
+            />
+            <div
+              aria-hidden="true"
+              className="absolute -bottom-48 -right-32 h-[34rem] w-[34rem] rounded-full bg-cyan-400/10 blur-3xl"
+            />
+            <div
+              aria-hidden="true"
+              className="absolute right-16 top-1/3 h-56 w-56 rounded-full border border-white/10"
+            />
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/20 bg-white p-2 shadow-lg">
+                {companySettings.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={companySettings.logo}
+                    alt={`${companySettings.name || "SD Enterprises"} logo`}
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <span className="text-2xl font-bold tracking-tight text-blue-900">
+                    SD
+                  </span>
+                )}
+              </div>
+              <div>
+                <p className="text-lg font-bold tracking-[0.18em]">SD</p>
+                <p className="text-xs font-semibold tracking-[0.28em] text-blue-100/80">
+                  ENTERPRISES
+                </p>
+              </div>
+            </div>
+            <div className="relative z-10 max-w-xl py-16">
+              <p className="mb-5 text-sm font-semibold uppercase tracking-[0.2em] text-blue-200">
+                Courier billing, simplified
+              </p>
+              <h2 className="text-4xl font-semibold leading-tight tracking-tight lg:text-5xl">
+                Streamline your courier billing.
+              </h2>
+              <p className="mt-6 max-w-lg text-lg leading-8 text-slate-300">
+                Manage invoices, customers, and GST filings in one powerful
+                dashboard.
+              </p>
+            </div>
+            <p className="relative z-10 text-sm text-slate-400">
+              A clearer view of your business, from docket to payment.
             </p>
           </div>
-          <form onSubmit={login} className="space-y-5">
-            <label className="block text-sm font-medium text-slate-700">
-              Login Email
-              <input
-                required
-                type="email"
-                autoComplete="username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                disabled={isLoggingIn}
-                className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-              />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Password
-              <input
-                required
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                disabled={isLoggingIn}
-                className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-              />
-            </label>
-            {loginError && (
-              <p role="alert" className="text-sm font-medium text-red-600">
-                {loginError}
+
+          <div className="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-12 sm:px-8">
+            <div className="w-full max-w-md rounded-2xl bg-white p-7 shadow-xl shadow-slate-200/70 ring-1 ring-slate-200/70 sm:p-10">
+              <div className="mb-8">
+                <div className="mb-8 flex items-center gap-3 md:hidden">
+                  <div className="flex h-12 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm">
+                    {companySettings.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={companySettings.logo}
+                        alt={`${companySettings.name || "SD Enterprises"} logo`}
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-lg font-bold text-blue-900">SD</span>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-extrabold tracking-[0.12em] text-slate-900">
+                      SD ENTERPRISES
+                    </p>
+                    <p className="text-[10px] font-semibold tracking-[0.16em] text-slate-500">
+                      BILLING SUITE
+                    </p>
+                  </div>
+                </div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+                  Welcome back
+                </h1>
+                <p className="mt-2 text-sm text-gray-500">
+                  Sign in to your account
+                </p>
+              </div>
+
+              <form onSubmit={login} className="space-y-5">
+                <label className="block text-sm font-medium text-slate-700">
+                  Email address
+                  <span className="relative mt-2 block">
+                    <svg
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="5" width="18" height="14" rx="2" />
+                      <path d="m3 7 9 6 9-6" />
+                    </svg>
+                    <input
+                      required
+                      type="email"
+                      autoComplete="username"
+                      value={username}
+                      onChange={(event) => setUsername(event.target.value)}
+                      disabled={isLoggingIn}
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </span>
+                </label>
+
+                <label className="block text-sm font-medium text-slate-700">
+                  Password
+                  <span className="relative mt-2 block">
+                    <svg
+                      aria-hidden="true"
+                      className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="4" y="10" width="16" height="11" rx="2" />
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                      <path d="M12 14v3" />
+                    </svg>
+                    <input
+                      required
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      disabled={isLoggingIn}
+                      className="w-full rounded-lg border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-600 focus:bg-white focus:ring-2 focus:ring-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </span>
+                </label>
+
+                <div className="flex items-center justify-between gap-4 text-sm">
+                  <label className="flex items-center gap-2 text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-gray-300 text-blue-700 accent-blue-700 focus:ring-blue-600"
+                    />
+                    Remember me
+                  </label>
+                  <a
+                    href="#"
+                    onClick={(event) => event.preventDefault()}
+                    className="font-medium text-blue-700 transition hover:text-blue-800"
+                  >
+                    Forgot password?
+                  </a>
+                </div>
+
+                {loginError && (
+                  <p role="alert" className="text-sm font-medium text-red-600">
+                    {loginError}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className="w-full rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-md shadow-blue-900/15 transition hover:bg-blue-800 focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isLoggingIn ? "Signing in..." : "Sign in"}
+                </button>
+              </form>
+              <p className="mt-8 text-center text-xs text-slate-400">
+                SD Enterprises Billing Suite
               </p>
-            )}
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-200"
-            >
-              {isLoggingIn ? "Signing in..." : "Login"}
-            </button>
-          </form>
+            </div>
+          </div>
         </section>
       ) : (
         <div className="app-theme min-h-screen print:hidden">
