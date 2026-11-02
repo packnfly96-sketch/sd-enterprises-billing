@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+}
+
+.app-theme {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f8fafc 0%, #f8fafc 58%, #eff6ff 100%);
+}
+
+.app-theme h1,
+.app-theme h2,
+.app-theme h3 {
+  color: #0f172a;
+}
+
+.app-theme aside[class*="bg-slate-900"] {
+  background-color: #0f172a;
+}
+
+.app-theme aside nav button[aria-current="page"] {
+  border-color: #f97316;
+  background: #f97316;
+  color: #fff;
+  box-shadow: 0 6px 18px rgb(249 115 22 / 22%);
+}
+
+.app-theme aside nav button:not([aria-current="page"]) {
+  color: #94a3b8;
+}
+
+.app-theme aside nav button:not([aria-current="page"]):hover {
+  background: rgb(255 255 255 / 5%);
+  color: #fff;
+}
+
+.app-theme [class*="text-blue-"] {
+  color: #1e3a8a;
+}
+
+.app-theme button[class*="bg-blue-600"],
+.app-theme button[class*="bg-blue-700"] {
+  border-radius: 0.75rem;
+  background-color: #1e3a8a;
+  color: #fff;
+  box-shadow: 0 4px 12px rgb(30 58 138 / 16%);
+  transition:
+    background-color 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+}
+
+.app-theme button[class*="bg-blue-600"]:hover,
+.app-theme button[class*="bg-blue-700"]:hover {
+  background-color: #1e40af;
+  box-shadow: 0 8px 18px rgb(30 58 138 / 22%);
+}
+
+.app-theme button[class*="border-blue-"] {
+  border-color: #fdba74;
+  color: #c2410c;
+}
+
+.app-theme button[class*="border-blue-"]:hover {
+  background-color: #fff7ed;
+}
+
+.app-theme button[class*="border-slate-"],
+.app-theme button[class*="border-gray-"] {
+  border-radius: 0.75rem;
+  background-color: #fff;
+  color: #334155;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.app-theme button[class*="border-slate-"]:hover,
+.app-theme button[class*="border-gray-"]:hover {
+  border-color: #fdba74;
+  background-color: #fff7ed;
+  color: #c2410c;
+}
+
+.app-theme nav[aria-label="Filter invoices"] button[aria-pressed="true"] {
+  background-color: #1e3a8a;
+  color: #fff;
+}
+
+.app-theme input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.app-theme select,
+.app-theme textarea {
+  border-color: #cbd5e1;
+  border-radius: 0.75rem;
+  background-color: rgb(248 250 252 / 70%);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.app-theme input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+.app-theme select:focus,
+.app-theme textarea:focus {
+  border-color: #2563eb;
+  background-color: #fff;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 14%);
+  outline: none;
+}
+
+.app-theme article,
+.app-theme section[class*="rounded-"][class*="border"][class*="bg-white"],
+.app-theme aside[class*="rounded-"][class*="border"][class*="bg-white"] {
+  border-color: rgb(226 232 240 / 75%);
+  border-radius: 1rem;
+  background-color: rgb(255 255 255 / 88%);
+  box-shadow: 0 8px 30px rgb(15 23 42 / 4%);
+  backdrop-filter: blur(12px);
+}
+
+.app-theme table th {
+  background-color: #f8fafc;
+  color: #475569;
+}
+
+.app-theme table td {
+  color: #1e293b;
+}
+
+.app-theme span[class*="bg-emerald-50"] {
+  border: 1px solid #bbf7d0;
+  background-color: #f0fdf4;
+  color: #15803d;
+}
+
+.app-theme span[class*="bg-orange-"],
+.app-theme span[class*="bg-amber-"] {
+  border: 1px solid #fed7aa;
+  background-color: #fff7ed;
+  color: #c2410c;
+}
